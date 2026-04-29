@@ -49,50 +49,57 @@ def counter(ds: str, expr: str, name: str) -> dict:
     }
 
 
+def _safe_name(expr: str) -> str:
+    """Mirror Lakeview's field-name convention: lowercase, no spaces, no backticks."""
+    return expr.lower().replace(" ", "").replace("`", "").replace('"', "")
+
+
 def bar(ds: str, x: tuple, y: tuple, title: str, sort: str = "y-reversed",
         color: tuple | None = None, horizontal: bool = False) -> dict:
+    xn, yn = _safe_name(x[0]), _safe_name(y[0])
     fields = [
-        {"name": "x", "expression": x[0]},
-        {"name": "y", "expression": y[0]},
+        {"name": xn, "expression": x[0]},
+        {"name": yn, "expression": y[0]},
     ]
     encodings = {
-        "x": {"fieldName": "x", "scale": {"type": "categorical", "sort": {"by": sort}}, "displayName": x[1]},
-        "y": {"fieldName": "y", "scale": {"type": "quantitative"}, "displayName": y[1]},
+        "x": {"fieldName": xn, "scale": {"type": "categorical", "sort": {"by": sort}}, "displayName": x[1]},
+        "y": {"fieldName": yn, "scale": {"type": "quantitative"}, "displayName": y[1]},
         "label": {"show": True},
     }
     if color:
-        fields.append({"name": "c", "expression": color[0]})
-        encodings["color"] = {"fieldName": "c", "scale": {"type": "categorical"}, "displayName": color[1]}
+        cn = _safe_name(color[0])
+        fields.append({"name": cn, "expression": color[0]})
+        encodings["color"] = {"fieldName": cn, "scale": {"type": "categorical"}, "displayName": color[1]}
     spec = {
         "version": 3,
         "widgetType": "bar",
         "encodings": encodings,
         "frame": {"showTitle": True, "title": title},
-        "mark": {"colors": PALETTE},
     }
     if horizontal:
         spec["encodings"]["x"], spec["encodings"]["y"] = spec["encodings"]["y"], spec["encodings"]["x"]
     return {
         "widget": {
             "name": nid(),
-            "queries": [{"name": "main", "query": {"datasetName": ds, "fields": fields, "disaggregated": False}}],
+            "queries": [{"name": "main_query", "query": {"datasetName": ds, "fields": fields, "disaggregated": False}}],
             "spec": spec,
         }
     }
 
 
 def line(ds: str, x: tuple, y: tuple, color: tuple, title: str) -> dict:
+    xn, yn, cn = _safe_name(x[0]), _safe_name(y[0]), _safe_name(color[0])
     return {
         "widget": {
             "name": nid(),
             "queries": [{
-                "name": "main",
+                "name": "main_query",
                 "query": {
                     "datasetName": ds,
                     "fields": [
-                        {"name": "x", "expression": x[0]},
-                        {"name": "y", "expression": y[0]},
-                        {"name": "c", "expression": color[0]},
+                        {"name": xn, "expression": x[0]},
+                        {"name": yn, "expression": y[0]},
+                        {"name": cn, "expression": color[0]},
                     ],
                     "disaggregated": False,
                 },
@@ -101,12 +108,11 @@ def line(ds: str, x: tuple, y: tuple, color: tuple, title: str) -> dict:
                 "version": 3,
                 "widgetType": "line",
                 "encodings": {
-                    "x": {"fieldName": "x", "scale": {"type": "temporal"}, "displayName": x[1]},
-                    "y": {"fieldName": "y", "scale": {"type": "quantitative"}, "displayName": y[1]},
-                    "color": {"fieldName": "c", "scale": {"type": "categorical"}, "displayName": color[1]},
+                    "x": {"fieldName": xn, "scale": {"type": "temporal"}, "displayName": x[1]},
+                    "y": {"fieldName": yn, "scale": {"type": "quantitative"}, "displayName": y[1]},
+                    "color": {"fieldName": cn, "scale": {"type": "categorical"}, "displayName": color[1]},
                 },
                 "frame": {"showTitle": True, "title": title},
-                "mark": {"colors": PALETTE},
             },
         }
     }
@@ -119,16 +125,17 @@ def area(ds: str, x: tuple, y: tuple, color: tuple, title: str) -> dict:
 
 
 def pie(ds: str, angle_expr: str, angle_name: str, color_expr: str, color_name: str, title: str) -> dict:
+    an, cn = _safe_name(angle_expr), _safe_name(color_expr)
     return {
         "widget": {
             "name": nid(),
             "queries": [{
-                "name": "main",
+                "name": "main_query",
                 "query": {
                     "datasetName": ds,
                     "fields": [
-                        {"name": "v", "expression": angle_expr},
-                        {"name": "c", "expression": color_expr},
+                        {"name": an, "expression": angle_expr},
+                        {"name": cn, "expression": color_expr},
                     ],
                     "disaggregated": False,
                 },
@@ -137,21 +144,30 @@ def pie(ds: str, angle_expr: str, angle_name: str, color_expr: str, color_name: 
                 "version": 3,
                 "widgetType": "pie",
                 "encodings": {
-                    "angle": {"fieldName": "v", "scale": {"type": "quantitative"}, "displayName": angle_name},
-                    "color": {"fieldName": "c", "scale": {"type": "categorical"}, "displayName": color_name},
+                    "angle": {"fieldName": an, "scale": {"type": "quantitative"}, "displayName": angle_name},
+                    "color": {"fieldName": cn, "scale": {"type": "categorical"}, "displayName": color_name},
                 },
                 "frame": {"showTitle": True, "title": title},
-                "mark": {"colors": PALETTE},
             },
         }
     }
 
 
 def table(ds: str, columns: list[tuple], title: str) -> dict:
-    fields = [{"name": f"c{i}", "expression": c[0]} for i, c in enumerate(columns)]
+    fields = []
     cols = []
-    for i, (_, name, ctype, display_as) in enumerate(columns):
-        col = {"fieldName": f"c{i}", "type": ctype, "displayAs": display_as, "title": name, "displayName": name}
+    used = set()
+    for (expr, name, ctype, display_as) in columns:
+        fname = _safe_name(expr)
+        # Ensure unique field names
+        base = fname
+        i = 1
+        while fname in used:
+            fname = f"{base}_{i}"
+            i += 1
+        used.add(fname)
+        fields.append({"name": fname, "expression": expr})
+        col = {"fieldName": fname, "type": ctype, "displayAs": display_as, "title": name, "displayName": name}
         if display_as == "number":
             col["numberFormat"] = "#,##0.00"
             col["alignContent"] = "right"
@@ -159,7 +175,7 @@ def table(ds: str, columns: list[tuple], title: str) -> dict:
     return {
         "widget": {
             "name": nid(),
-            "queries": [{"name": "main", "query": {"datasetName": ds, "fields": fields, "disaggregated": True}}],
+            "queries": [{"name": "main_query", "query": {"datasetName": ds, "fields": fields, "disaggregated": True}}],
             "spec": {
                 "version": 1,
                 "widgetType": "table",
@@ -171,10 +187,16 @@ def table(ds: str, columns: list[tuple], title: str) -> dict:
 
 
 def md(text: str) -> dict:
+    """Markdown/text widget — uses Lakeview's text-block schema (widgetType: text)."""
     return {
         "widget": {
             "name": nid(),
-            "textbox_spec": text,
+            "spec": {
+                "version": 1,
+                "widgetType": "text",
+                "frame": {"showTitle": False},
+                "text": text,
+            },
         }
     }
 
@@ -286,69 +308,61 @@ GROUP BY 1,2
 # ---------------- Pages / Layout ----------------
 LAYOUT = []
 
-LAYOUT.append(at(md(
-    "# Techo-Bloc — Sales & Finance 360\n\n"
-    "**Single source of truth** powered by the Databricks Lakehouse + Unity Catalog. "
-    "D365 F&O and AX 2012 unified, governed with column masking & row-level security, "
-    "and exposed for self-service analytics through AI/BI dashboards, Genie, Power BI, and Excel.\n\n"
-    "_Active persona override: `governance.demo_persona`_ — flip to demo masking & RLS live."
-), 0, 0, 6, 2))
-
-# Row 1: KPI counters
-LAYOUT.append(at(counter(DS_KPI, "SUM(`net_revenue`)", "Net Revenue (USD)"),         0, 2, 1, 3))
-LAYOUT.append(at(counter(DS_KPI, "SUM(`gross_revenue`)", "Gross Revenue (USD)"),     1, 2, 1, 3))
-LAYOUT.append(at(counter(DS_KPI, "SUM(`active_customers`)", "Active Customers"),     2, 2, 1, 3))
-LAYOUT.append(at(counter(DS_KPI, "SUM(`invoice_count`)", "Invoice Count"),           3, 2, 1, 3))
-LAYOUT.append(at(counter(DS_OPEN, "SUM(`open_pipeline_usd`)", "Open Pipeline (USD)"), 4, 2, 2, 3))
+# Row 1: KPI counters (top of canvas)
+LAYOUT.append(at(counter(DS_KPI, "SUM(`net_revenue`)", "Net Revenue (USD)"),         0, 0, 1, 3))
+LAYOUT.append(at(counter(DS_KPI, "SUM(`gross_revenue`)", "Gross Revenue (USD)"),     1, 0, 1, 3))
+LAYOUT.append(at(counter(DS_KPI, "SUM(`active_customers`)", "Active Customers"),     2, 0, 1, 3))
+LAYOUT.append(at(counter(DS_KPI, "SUM(`invoice_count`)", "Invoice Count"),           3, 0, 1, 3))
+LAYOUT.append(at(counter(DS_OPEN, "SUM(`open_pipeline_usd`)", "Open Pipeline (USD)"), 4, 0, 2, 3))
 
 # Row 2: GL Multi-year trend (1GB Power BI cap killer)
 LAYOUT.append(at(area(DS_GL,
     x=("`gl_month`", "Month"),
     y=("SUM(`amount_usd`)", "USD"),
     color=("`gl_category`", "GL Category"),
-    title="Multi-year GL trend  •  600K rows in <1s  •  ('Solves the Power BI 1GB cap')"
-), 0, 5, 6, 5))
+    title="Multi-year GL trend (5+ years, 600K rows)"
+), 0, 3, 6, 5))
 
 # Row 3: Revenue by product line + territory + segment
 LAYOUT.append(at(bar(DS_PRODLINE,
     x=("`product_line`", "Product Line"),
     y=("SUM(`net_revenue`)", "Net Revenue"),
     title="Net Revenue by Product Line",
-), 0, 10, 3, 5))
+), 0, 8, 3, 5))
 
 LAYOUT.append(at(bar(DS_TERRITORY,
     x=("`territory`", "Territory"),
     y=("SUM(`net_revenue`)", "Net Revenue"),
-    title="Net Revenue by Territory  (RLS demo target)",
+    title="Net Revenue by Territory (RLS demo target)",
     sort="y-reversed",
-), 3, 10, 3, 5))
+), 3, 8, 3, 5))
 
 LAYOUT.append(at(pie(DS_SEGMENT,
     angle_expr="SUM(`net_revenue`)", angle_name="Net Revenue",
     color_expr="`customer_segment`", color_name="Segment",
-    title="Revenue by Customer Segment (Homeowner / Contractor / Commercial)"
-), 0, 15, 3, 5))
+    title="Revenue by Customer Segment"
+), 0, 13, 3, 5))
 
 LAYOUT.append(at(bar(DS_AR,
     x=("`aging_bucket`", "Aging Bucket"),
     y=("SUM(`outstanding_usd`)", "Outstanding (USD)"),
-    title="AR Aging — multi-year invoices (D365 + AX 2012)",
+    title="AR Aging (multi-year, D365 + AX 2012)",
     sort="natural-order",
-), 3, 15, 3, 5))
+), 3, 13, 3, 5))
 
 # Row 4: D365 vs AX split + Top customers table
 LAYOUT.append(at(pie(DS_SOURCE,
     angle_expr="SUM(`net_revenue`)", angle_name="Net Revenue",
     color_expr="`source_system`", color_name="Source System",
-    title="D365 F&O ↔ AX 2012 unification  •  net revenue split"
-), 0, 20, 2, 5))
+    title="D365 vs AX 2012 net revenue split"
+), 0, 18, 2, 5))
 
 LAYOUT.append(at(bar(DS_PROD_TIER,
     x=("`product_line`", "Product Line"),
     y=("SUM(`net_revenue`)", "Net Revenue"),
     color=("`product_tier`", "Tier"),
-    title="Product Line × Product Tier",
-), 2, 20, 4, 5))
+    title="Product Line by Product Tier",
+), 2, 18, 4, 5))
 
 LAYOUT.append(at(table(DS_TOPCUST, [
     ("`customer_name`",         "Customer",            "string", "string"),
@@ -357,21 +371,21 @@ LAYOUT.append(at(table(DS_TOPCUST, [
     ("`lifetime_revenue_usd`",  "Lifetime Revenue",    "float",  "number"),
     ("`lifetime_invoices`",     "Invoices",            "integer","number"),
     ("`open_pipeline_usd`",     "Open Pipeline",       "float",  "number"),
-], "Top 15 customers (lifetime)"), 0, 25, 6, 6))
+], "Top 15 customers (lifetime)"), 0, 23, 6, 6))
 
-# Row 5: Web → leads
+# Row 5: Web -> leads
 LAYOUT.append(at(line(DS_WEBLEAD,
     x=("`month`", "Month"),
     y=("SUM(`total_sessions`)", "Total sessions"),
     color=("'Sessions'", "Series"),
-    title="Web sessions / month (GA)"
-), 0, 31, 3, 5))
+    title="Web sessions per month (GA)"
+), 0, 29, 3, 5))
 
 LAYOUT.append(at(bar(DS_CAMPAIGN,
     x=("`campaign`", "Campaign"),
     y=("SUM(`quotes`)", "Quote requests"),
-    title="Campaign → quote-request volume",
-), 3, 31, 3, 5))
+    title="Campaign to quote-request volume",
+), 3, 29, 3, 5))
 
 PAGE = {
     "name": nid(),
