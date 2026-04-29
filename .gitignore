@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Temporary outputs
+benchmark_results.json
+/tmp_*
+
+# Anything containing real customer data — never commit
+*.csv
+*.parquet
+*.tsv
+secrets.*
+*.env
