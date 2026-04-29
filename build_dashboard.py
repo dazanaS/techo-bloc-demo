@@ -22,23 +22,25 @@ def make_dataset(name: str, display: str, sql: str) -> dict:
 
 
 def counter(ds: str, expr: str, name: str) -> dict:
-    field = nid()
+    # Match the proven Lakeview shape: disaggregated=true, no `format` key,
+    # field name mirrors the expression style.
+    field_name = expr.lower().replace(" ", "").replace("`", "")
     return {
         "widget": {
             "name": nid(),
             "queries": [{
-                "name": "main",
+                "name": "main_query",
                 "query": {
                     "datasetName": ds,
-                    "fields": [{"name": field, "expression": expr}],
-                    "disaggregated": False,
+                    "fields": [{"name": field_name, "expression": expr}],
+                    "disaggregated": True,
                 },
             }],
             "spec": {
                 "version": 2,
                 "widgetType": "counter",
                 "encodings": {"value": {
-                    "fieldName": field,
+                    "fieldName": field_name,
                     "displayName": name,
                 }},
                 "frame": {"showTitle": True, "title": name},
@@ -396,8 +398,10 @@ def strip_nulls(obj):
 def main():
     import sys
     cleaned = strip_nulls(DASHBOARD)
+    import os
+    name = os.environ.get("DASHBOARD_NAME", "Techo-Bloc — Sales & Finance 360 (Lakehouse Demo)")
     payload = {
-        "display_name": "Techo-Bloc — Sales & Finance 360 (Lakehouse Demo)",
+        "display_name": name,
         "warehouse_id": WAREHOUSE,
         "serialized_dashboard": json.dumps(cleaned),
     }
